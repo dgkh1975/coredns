@@ -396,6 +396,13 @@ var dnsTestCases = []test.Case{
 			test.AAAA("svc-dual-stack.testns.svc.cluster.local.  5       IN      AAAA       10::3"),
 		},
 	},
+	{
+		Qname: "svc1.testns.svc.cluster.local.", Qtype: dns.TypeSOA,
+		Rcode: dns.RcodeSuccess,
+		Ns: []dns.RR{
+			test.SOA("cluster.local.	5	IN	SOA	ns.dns.cluster.local. hostmaster.cluster.local. 1499347823 7200 1800 86400 5"),
+		},
+	},
 }
 
 func TestServeDNS(t *testing.T) {
@@ -561,6 +568,17 @@ func (APIConnServeTest) PodIndex(ip string) []*object.Pod {
 }
 
 var svcIndex = map[string][]*object.Service{
+	"kubedns.kube-system": {
+		{
+			Name:       "kubedns",
+			Namespace:  "kube-system",
+			Type:       api.ServiceTypeClusterIP,
+			ClusterIPs: []string{"10.0.0.10"},
+			Ports: []api.ServicePort{
+				{Name: "dns", Protocol: "udp", Port: 53},
+			},
+		},
+	},
 	"svc1.testns": {
 		{
 			Name:       "svc1",
@@ -666,6 +684,21 @@ func (APIConnServeTest) ServiceList() []*object.Service {
 }
 
 var epsIndex = map[string][]*object.Endpoints{
+	"kubedns.kube-system": {{
+		Subsets: []object.EndpointSubset{
+			{
+				Addresses: []object.EndpointAddress{
+					{IP: "172.0.0.100"},
+				},
+				Ports: []object.EndpointPort{
+					{Port: 53, Protocol: "udp", Name: "dns"},
+				},
+			},
+		},
+		Name:      "kubedns",
+		Namespace: "kube-system",
+		Index:     object.EndpointsKey("kubedns", "kube-system"),
+	}},
 	"svc1.testns": {{
 		Subsets: []object.EndpointSubset{
 			{
