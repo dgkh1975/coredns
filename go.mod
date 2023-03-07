@@ -30,8 +30,8 @@ require (
 	github.com/prometheus/common v0.15.0
 	go.etcd.io/etcd v0.5.0-alpha.5.0.20200306183522-221f0cc107cb
 	go.uber.org/zap v1.14.1 // indirect
-	golang.org/x/crypto v0.0.0-20201221181555-eec23a3978ad
-	golang.org/x/sys v0.0.0-20201214210602-f9fddec55a1e
+	golang.org/x/crypto v0.1.0
+	golang.org/x/sys v0.1.0
 	google.golang.org/api v0.29.0
 	google.golang.org/grpc v1.29.1
 	gopkg.in/DataDog/dd-trace-go.v1 v1.28.0
