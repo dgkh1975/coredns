@@ -5,7 +5,6 @@ import (
 
 	"github.com/coredns/coredns/plugin"
 	"github.com/coredns/coredns/plugin/metrics/vars"
-	"github.com/coredns/coredns/plugin/pkg/dnstest"
 	"github.com/coredns/coredns/plugin/pkg/rcode"
 	"github.com/coredns/coredns/request"
 
@@ -16,6 +15,9 @@ import (
 func (m *Metrics) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (int, error) {
 	state := request.Request{W: w, Req: r}
 
+	// Capture the original request size before any plugins modify it
+	originalSize := r.Len()
+
 	qname := state.QName()
 	zone := plugin.Zones(m.ZoneNames()).Matches(qname)
 	if zone == "" {
@@ -23,10 +25,20 @@ func (m *Metrics) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg
 	}
 
 	// Record response to get status code and size of the reply.
-	rw := dnstest.NewRecorder(w)
+	rw := NewRecorder(w)
 	status, err := plugin.NextOrFailure(m.Name(), m.Next, ctx, rw, r)
 
-	vars.Report(WithServer(ctx), state, zone, rcode.ToString(rw.Rcode), rw.Len, rw.Start)
+	rc := rw.Rcode
+	if !plugin.ClientWrite(status) {
+		// when no response was written, fallback to status returned from next plugin as this status
+		// is actually used as rcode of DNS response
+		// see https://github.com/coredns/coredns/blob/master/core/dnsserver/server.go#L318
+		rc = status
+	}
+	// Pass the original request size to vars.Report
+	// rw.Plugin is set automatically by the plugin chain via the PluginTracker interface
+	vars.Report(WithServer(ctx), state, zone, WithView(ctx), rcode.ToString(rc), rw.Plugin,
+		rw.Len, rw.Start, vars.WithOriginalReqSize(originalSize))
 
 	return status, err
 }

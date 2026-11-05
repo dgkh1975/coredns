@@ -10,10 +10,11 @@
 // See https://github.com/coredns/coredns/issues/2723 for some discussion on this, which includes this quote:
 //
 // TL;DR: `fallthrough` is indeed risky and hackish, but still a good feature of CoreDNS as it allows to quickly answer boring edge cases.
-//
 package fall
 
 import (
+	"slices"
+
 	"github.com/coredns/coredns/plugin"
 )
 
@@ -26,15 +27,16 @@ type F struct {
 // Through will check if we should fallthrough for qname. Note that we've named the
 // variable in each plugin "Fall", so this then reads Fall.Through().
 func (f F) Through(qname string) bool {
-	return plugin.Zones(f.Zones).Matches(qname) != ""
+	return plugin.Zones(f.Zones).Contains(qname)
 }
 
 // setZones will set zones in f.
 func (f *F) setZones(zones []string) {
+	z := make([]string, 0, len(zones))
 	for i := range zones {
-		zones[i] = plugin.Host(zones[i]).Normalize()
+		z = append(z, plugin.Host(zones[i]).NormalizeExact()...)
 	}
-	f.Zones = zones
+	f.Zones = z
 }
 
 // SetZonesFromArgs sets zones in f to the passed value or to "." if the slice is empty.
@@ -47,16 +49,8 @@ func (f *F) SetZonesFromArgs(zones []string) {
 }
 
 // Equal returns true if f and g are equal.
-func (f F) Equal(g F) bool {
-	if len(f.Zones) != len(g.Zones) {
-		return false
-	}
-	for i := range f.Zones {
-		if f.Zones[i] != g.Zones[i] {
-			return false
-		}
-	}
-	return true
+func (f *F) Equal(g F) bool {
+	return slices.Equal(f.Zones, g.Zones)
 }
 
 // Zero returns a zero valued F.

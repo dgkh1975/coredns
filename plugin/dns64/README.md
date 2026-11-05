@@ -20,6 +20,8 @@ dns64 [PREFIX]
 ~~~
 
 * **PREFIX** defines a custom prefix instead of the default `64:ff9b::/96`.
+  Its length must be 32, 40, 48, 56, 64, or 96 bits, as defined in
+  [RFC 6052 Section 2.2](https://www.rfc-editor.org/info/rfc6052/#section-2.2).
 
 Or use this slightly longer form with more options:
 
@@ -27,11 +29,13 @@ Or use this slightly longer form with more options:
 dns64 [PREFIX] {
     [translate_all]
     prefix PREFIX
+    [allow_ipv4]
 }
 ~~~
 
 * `prefix` specifies any local IPv6 prefix to use, instead of the well known prefix (64:ff9b::/96)
 * `translate_all` translates all queries, including responses that have AAAA results.
+* `allow_ipv4` Allow translating queries if they come in over IPv4, default is IPv6 only translation.
 
 ## Examples
 
@@ -70,6 +74,19 @@ Enable translation even if an existing AAAA record is present.
 }
 ~~~
 
+Apply translation even to the requests which arrived over IPv4 network. Warning, the `allow_ipv4` feature will apply
+translations to requests coming from dual-stack clients. This means that a request for a client that sends an `AAAA`
+that would normal result in an `NXDOMAIN` would get a translated result.
+This may cause unwanted IPv6 dns64 traffic when a dualstack client would normally use the result of an `A` record request.
+
+~~~ corefile
+. {
+    dns64 {
+        allow_ipv4
+    }
+}
+~~~
+
 ## Metrics
 
 If monitoring is enabled (via the _prometheus_ plugin) then the following metrics are exported:
@@ -84,8 +101,8 @@ Not all features required by DNS64 are implemented, only basic AAAA synthesis.
 
 * Support "mapping of separate IPv4 ranges to separate IPv6 prefixes"
 * Resolve PTR records
-* Make resolver DNSSEC aware. See: [RFC 6147 Section 3](https://tools.ietf.org/html/rfc6147#section-3)
+* Make resolver DNSSEC aware. See: [RFC 6147 Section 3](https://www.rfc-editor.org/info/rfc6147/#section-3)
 
 ## See Also
 
-See [RFC 6147](https://tools.ietf.org/html/rfc6147) for more information on the DNS64 mechanism.
+See [RFC 6147](https://www.rfc-editor.org/info/rfc6147/) for more information on the DNS64 mechanism.

@@ -43,23 +43,31 @@ func (a Auto) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (i
 	qname := state.Name()
 
 	// Precheck with the origins, i.e. are we allowed to look here?
-	zone := plugin.Zones(a.Zones.Origins()).Matches(qname)
-	if zone == "" {
+	if !plugin.Zones(a.Zones.Origins()).Contains(qname) {
 		return plugin.NextOrFailure(a.Name(), a.Next, ctx, w, r)
 	}
 
 	// Now the real zone.
-	zone = plugin.Zones(a.Zones.Names()).Matches(qname)
+	zone := plugin.Zones(a.Zones.Names()).Matches(qname)
 	if zone == "" {
+		// If no next plugin is configured, it's more correct to return REFUSED as auto acts as an authoritative server
+		if a.Next == nil {
+			return dns.RcodeRefused, nil
+		}
 		return plugin.NextOrFailure(a.Name(), a.Next, ctx, w, r)
 	}
 
-	a.Zones.RLock()
-	z, ok := a.Zones.Z[zone]
-	a.Zones.RUnlock()
+	a.RLock()
+	z, ok := a.Z[zone]
+	a.RUnlock()
 
 	if !ok || z == nil {
 		return dns.RcodeServerFailure, nil
+	}
+
+	// If transfer is not loaded, we'll see these, answer with refused (no transfer allowed).
+	if state.QType() == dns.TypeAXFR || state.QType() == dns.TypeIXFR {
+		return dns.RcodeRefused, nil
 	}
 
 	answer, ns, extra, result := z.Lookup(ctx, state, qname)
@@ -77,7 +85,14 @@ func (a Auto) ServeDNS(ctx context.Context, w dns.ResponseWriter, r *dns.Msg) (i
 	case file.Delegation:
 		m.Authoritative = false
 	case file.ServerFailure:
-		return dns.RcodeServerFailure, nil
+		// If the result is SERVFAIL and the answer is non-empty, then the SERVFAIL came from an
+		// external CNAME lookup and the answer contains the CNAME with no target record. We should
+		// write the CNAME record to the client instead of sending an empty SERVFAIL response.
+		if len(m.Answer) == 0 {
+			return dns.RcodeServerFailure, nil
+		}
+		//  The rcode in the response should be the rcode received from the target lookup. RFC 6604 section 3
+		m.Rcode = dns.RcodeServerFailure
 	}
 
 	w.WriteMsg(m)

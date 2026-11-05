@@ -1,6 +1,8 @@
 package transfer
 
 import (
+	"net"
+
 	"github.com/coredns/caddy"
 	"github.com/coredns/coredns/core/dnsserver"
 	"github.com/coredns/coredns/plugin"
@@ -28,8 +30,10 @@ func setup(c *caddy.Controller) error {
 	})
 
 	c.OnStartup(func() error {
+		config := dnsserver.GetConfig(c)
+		t.tsigSecret = config.TsigSecret
 		// find all plugins that implement Transferer and add them to Transferers
-		plugins := dnsserver.GetConfig(c).Handlers()
+		plugins := config.Handlers()
 		for _, pl := range plugins {
 			tr, ok := pl.(Transferer)
 			if !ok {
@@ -47,28 +51,7 @@ func parseTransfer(c *caddy.Controller) (*Transfer, error) {
 	t := &Transfer{}
 	for c.Next() {
 		x := &xfr{}
-		zones := c.RemainingArgs()
-
-		if len(zones) != 0 {
-			x.Zones = zones
-			for i := 0; i < len(x.Zones); i++ {
-				nzone, err := plugin.Host(x.Zones[i]).MustNormalize()
-				if err != nil {
-					return nil, err
-				}
-				x.Zones[i] = nzone
-			}
-		} else {
-			x.Zones = make([]string, len(c.ServerBlockKeys))
-			for i := 0; i < len(c.ServerBlockKeys); i++ {
-				nzone, err := plugin.Host(c.ServerBlockKeys[i]).MustNormalize()
-				if err != nil {
-					return nil, err
-				}
-				x.Zones[i] = nzone
-			}
-		}
-
+		x.Zones = plugin.OriginsFromArgsOrServerBlock(c.RemainingArgs(), c.ServerBlockKeys)
 		for c.NextBlock() {
 			switch c.Val() {
 			case "to":
@@ -87,6 +70,19 @@ func parseTransfer(c *caddy.Controller) (*Transfer, error) {
 					}
 					x.to = append(x.to, normalized)
 				}
+			case "source":
+				args := c.RemainingArgs()
+				if len(args) != 1 {
+					return nil, c.ArgErr()
+				}
+				if x.source != nil {
+					return nil, plugin.Error("transfer", c.Err("source already specified"))
+				}
+				ip := net.ParseIP(args[0])
+				if ip == nil {
+					return nil, plugin.Error("transfer", c.Errf("invalid source address %q", args[0]))
+				}
+				x.source = ip
 			default:
 				return nil, plugin.Error("transfer", c.Errf("unknown property %q", c.Val()))
 			}

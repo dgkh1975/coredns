@@ -2,7 +2,7 @@ package transfer
 
 import (
 	"context"
-	"fmt"
+	"errors"
 	"testing"
 
 	"github.com/coredns/coredns/plugin/pkg/dnstest"
@@ -16,19 +16,19 @@ type (
 	t2 struct{}
 )
 
-func (t t1) Transfer(zone string, serial uint32) (<-chan []dns.RR, error) {
+func (t t1) Transfer(zone string, _serial uint32) (<-chan []dns.RR, error) {
 	const z = "example.org."
 	if zone != z {
 		return nil, ErrNotAuthoritative
 	}
-	return nil, fmt.Errorf(z)
+	return nil, errors.New(z)
 }
-func (t t2) Transfer(zone string, serial uint32) (<-chan []dns.RR, error) {
+func (t t2) Transfer(zone string, _serial uint32) (<-chan []dns.RR, error) {
 	const z = "sub.example.org."
 	if zone != z {
 		return nil, ErrNotAuthoritative
 	}
-	return nil, fmt.Errorf(z)
+	return nil, errors.New(z)
 }
 
 func TestZoneSelection(t *testing.T) {
@@ -47,7 +47,7 @@ func TestZoneSelection(t *testing.T) {
 	}
 	r := new(dns.Msg)
 	r.SetAxfr("sub.example.org.")
-	w := dnstest.NewRecorder(&test.ResponseWriter{})
+	w := dnstest.NewRecorder(&test.ResponseWriter{TCP: true})
 	_, err := tr.ServeDNS(context.TODO(), w, r)
 	if err == nil {
 		t.Fatal("Expected error, got nil")

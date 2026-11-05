@@ -4,17 +4,23 @@ package coremain
 import (
 	"flag"
 	"fmt"
-	"io/ioutil"
 	"log"
 	"os"
+	"path/filepath"
 	"runtime"
 	"strings"
 
 	"github.com/coredns/caddy"
 	"github.com/coredns/coredns/core/dnsserver"
+	clog "github.com/coredns/coredns/plugin/pkg/log"
+
+	"go.uber.org/automaxprocs/maxprocs"
 )
 
 func init() {
+	if err := dnsserver.Register(); err != nil {
+		panic(err)
+	}
 	caddy.DefaultConfigFile = "Corefile"
 	caddy.Quiet = true // don't show init stuff from caddy
 	setVersion()
@@ -24,11 +30,15 @@ func init() {
 	flag.StringVar(&caddy.PidFile, "pidfile", "", "Path to write pid file")
 	flag.BoolVar(&version, "version", false, "Show version")
 	flag.BoolVar(&dnsserver.Quiet, "quiet", false, "Quiet mode (no initialization output)")
+	flag.StringVar(&logFormat, "log-format", "text", "Log format (text or json)")
 
 	caddy.RegisterCaddyfileLoader("flag", caddy.LoaderFunc(confLoader))
 	caddy.SetDefaultCaddyfileLoader("default", caddy.LoaderFunc(defaultLoader))
 
-	caddy.AppName = coreName
+	flag.StringVar(&dnsserver.Port, serverType+".port", dnsserver.DefaultPort, "Default port")
+	flag.StringVar(&dnsserver.Port, "p", dnsserver.DefaultPort, "Default port")
+
+	caddy.AppName = CoreName
 	caddy.AppVersion = CoreVersion
 }
 
@@ -36,13 +46,20 @@ func init() {
 func Run() {
 	caddy.TrapSignals()
 	flag.Parse()
+	if logFormat != "text" {
+		if err := clog.Configure(logFormat, os.Stdout); err != nil {
+			mustLogFatal(err)
+		}
+	}
 
 	if len(flag.Args()) > 0 {
 		mustLogFatal(fmt.Errorf("extra command line arguments: %s", flag.Args()))
 	}
 
-	log.SetOutput(os.Stdout)
-	log.SetFlags(0) // Set to 0 because we're doing our own time, with timezone
+	clog.SetOutput(os.Stdout)
+	if !clog.IsJSON() {
+		log.SetFlags(LogFlags)
+	}
 
 	if version {
 		showVersion()
@@ -51,6 +68,11 @@ func Run() {
 	if plugins {
 		fmt.Println(caddy.DescribePlugins())
 		os.Exit(0)
+	}
+
+	_, err := maxprocs.Set(maxprocs.Logger(log.Printf))
+	if err != nil {
+		clog.Warningf("Failed to set GOMAXPROCS: %v", err)
 	}
 
 	// Get Corefile input
@@ -66,11 +88,18 @@ func Run() {
 	}
 
 	if !dnsserver.Quiet {
-		showVersion()
+		if clog.IsJSON() {
+			clog.Info(strings.TrimSuffix(versionString()+releaseString(), "\n"))
+			if devBuild && gitShortStat != "" {
+				clog.Infof("%s\n%s", gitShortStat, gitFilesModified)
+			}
+		} else {
+			showVersion()
+		}
 	}
 
 	// Twiddle your thumbs
-	instance.Wait()
+	runService(instance)
 }
 
 // mustLogFatal wraps log.Fatal() in a way that ensures the
@@ -79,9 +108,12 @@ func Run() {
 // enabled. If this process is an upgrade, however, and the user
 // might not be there anymore, this just logs to the process
 // log and exits.
-func mustLogFatal(args ...interface{}) {
+func mustLogFatal(args ...any) {
 	if !caddy.IsUpgrade() {
-		log.SetOutput(os.Stderr)
+		clog.SetOutput(os.Stderr)
+	}
+	if clog.IsJSON() {
+		clog.Fatal(args...)
 	}
 	log.Fatal(args...)
 }
@@ -96,7 +128,7 @@ func confLoader(serverType string) (caddy.Input, error) {
 		return caddy.CaddyfileFromPipe(os.Stdin, serverType)
 	}
 
-	contents, err := ioutil.ReadFile(conf)
+	contents, err := os.ReadFile(filepath.Clean(conf))
 	if err != nil {
 		return nil, err
 	}
@@ -109,7 +141,7 @@ func confLoader(serverType string) (caddy.Input, error) {
 
 // defaultLoader loads the Corefile from the current working directory.
 func defaultLoader(serverType string) (caddy.Input, error) {
-	contents, err := ioutil.ReadFile(caddy.DefaultConfigFile)
+	contents, err := os.ReadFile(caddy.DefaultConfigFile)
 	if err != nil {
 		if os.IsNotExist(err) {
 			return nil, nil
@@ -163,9 +195,13 @@ func setVersion() {
 
 // Flags that control program flow or startup
 var (
-	conf    string
-	version bool
-	plugins bool
+	conf      string
+	version   bool
+	plugins   bool
+	logFormat string
+
+	// LogFlags are initially set to 0 for no extra output
+	LogFlags int
 )
 
 // Build information obtained with the help of -ldflags
@@ -179,6 +215,6 @@ var (
 	gitShortStat     string // git diff-index --shortstat
 	gitFilesModified string // git diff-index --name-only HEAD
 
-	// Gitcommit contains the commit where we built CoreDNS from.
+	// GitCommit contains the commit where we built CoreDNS from.
 	GitCommit string
 )

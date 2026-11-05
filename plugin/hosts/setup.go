@@ -26,6 +26,7 @@ func periodicHostsUpdate(h *Hosts) chan bool {
 
 	go func() {
 		ticker := time.NewTicker(h.options.reload)
+		defer ticker.Stop()
 		for {
 			select {
 			case <-parseChan:
@@ -95,32 +96,28 @@ func hostsParse(c *caddy.Controller) (Hosts, error) {
 			}
 			s, err := os.Stat(h.path)
 			if err != nil {
-				if os.IsNotExist(err) {
-					log.Warningf("File does not exist: %s", h.path)
-				} else {
+				if !os.IsNotExist(err) {
 					return h, c.Errf("unable to access hosts file '%s': %v", h.path, err)
 				}
+				log.Warningf("File does not exist: %s", h.path)
 			}
 			if s != nil && s.IsDir() {
 				log.Warningf("Hosts file %q is a directory", h.path)
 			}
 		}
 
-		origins := make([]string, len(c.ServerBlockKeys))
-		copy(origins, c.ServerBlockKeys)
-		if len(args) > 0 {
-			origins = args
-		}
-
-		for i := range origins {
-			origins[i] = plugin.Host(origins[i]).Normalize()
-		}
-		h.Origins = origins
+		h.Origins = plugin.OriginsFromArgsOrServerBlock(args, c.ServerBlockKeys)
+		h.zones = plugin.Zones(h.Origins)
 
 		for c.NextBlock() {
 			switch c.Val() {
 			case "fallthrough":
 				h.Fall.SetZonesFromArgs(c.RemainingArgs())
+			case "fallthrough_unsupported":
+				if len(c.RemainingArgs()) != 0 {
+					return h, c.ArgErr()
+				}
+				h.fallthroughUnsupported = true
 			case "no_reverse":
 				h.options.autoReverse = false
 			case "ttl":
@@ -158,6 +155,9 @@ func hostsParse(c *caddy.Controller) (Hosts, error) {
 				return h, c.Errf("unknown property '%s'", c.Val())
 			}
 		}
+	}
+	if h.fallthroughUnsupported && len(h.Fall.Zones) == 0 {
+		return h, c.Err("fallthrough_unsupported requires fallthrough")
 	}
 
 	h.initInline(inline)

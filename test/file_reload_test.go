@@ -1,7 +1,7 @@
 package test
 
 import (
-	"io/ioutil"
+	"os"
 	"testing"
 	"time"
 
@@ -11,13 +11,13 @@ import (
 )
 
 func TestZoneReload(t *testing.T) {
-	name, rm, err := test.TempFile(".", exampleOrg)
+	name, rm, err := test.TempFile(".", relativeReloadZone)
 	if err != nil {
 		t.Fatalf("Failed to create zone: %s", err)
 	}
 	defer rm()
 
-	// Corefile with two stanzas
+	// Both stanzas load the same relative zone file with their own origin.
 	corefile := `
 	example.org:0 {
 		file ` + name + ` {
@@ -45,9 +45,11 @@ func TestZoneReload(t *testing.T) {
 	}
 
 	// Remove RR from the Apex
-	ioutil.WriteFile(name, []byte(exampleOrgUpdated), 0644)
+	if err := os.WriteFile(name, []byte(relativeReloadZoneUpdated), 0644); err != nil {
+		t.Fatal(err)
+	}
 
-	time.Sleep(10 * time.Millisecond) // reload time
+	time.Sleep(20 * time.Millisecond) // reload time, with some race insurance
 
 	resp, err = dns.Exchange(m, udp)
 	if err != nil {
@@ -55,13 +57,21 @@ func TestZoneReload(t *testing.T) {
 	}
 
 	if len(resp.Answer) != 1 {
-		t.Fatalf("Expected two RR in answer section got %d", len(resp.Answer))
+		t.Fatalf("Expected one RR in answer section got %d", len(resp.Answer))
 	}
 }
 
-const exampleOrgUpdated = `; example.org test file
-example.org.		IN	SOA	sns.dns.icann.org. noc.dns.icann.org. 2016082541 7200 3600 1209600 3600
-example.org.		IN	NS	b.iana-servers.net.
-example.org.		IN	NS	a.iana-servers.net.
-example.org.		IN	A	127.0.0.2
+const relativeReloadZone = `
+@ IN SOA sns.dns.icann.org. noc.dns.icann.org. 2016082540 7200 3600 1209600 3600
+@ IN NS b.iana-servers.net.
+@ IN NS a.iana-servers.net.
+@ IN A 127.0.0.1
+@ IN A 127.0.0.2
+`
+
+const relativeReloadZoneUpdated = `
+@ IN SOA sns.dns.icann.org. noc.dns.icann.org. 2016082541 7200 3600 1209600 3600
+@ IN NS b.iana-servers.net.
+@ IN NS a.iana-servers.net.
+@ IN A 127.0.0.2
 `
